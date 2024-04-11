@@ -1,0 +1,277 @@
+channelId > page.tsx
+
+import { redirectToSignIn } from "@clerk/nextjs";
+import { redirect } from "next/navigation";
+import { ChannelType } from "@prisma/client";
+
+import { currentProfile } from "@/lib/current-profile";
+import { ChatHeader } from "@/components/chat/chat-header";
+import { ChatInput } from "@/components/chat/chat-input";
+import { ChatMessages } from "@/components/chat/chat-messages";
+// import { MediaRoom } from "@/components/media-room";
+import { db } from "@/lib/db";
+
+interface ChannelIdPageProps {
+  params: {
+    serverId: string;
+    channelId: string;
+  }
+}
+
+ const ChannelIdPage = async ({
+  params
+}: ChannelIdPageProps) => {
+  const profile = await currentProfile();
+
+  if (!profile) {
+    return redirectToSignIn();
+  }
+
+  const channel = await db.channel.findUnique({
+    where: {
+      id: params.channelId,
+    },
+  });
+
+  const member = await db.member.findFirst({
+    where: {
+      serverId: params.serverId,
+      profileId: profile.id,
+    }
+  });
+
+  if (!channel || !member) {
+    redirect("/");
+  }
+
+  return ( 
+    <div className="bg-white dark:bg-[#313338] flex flex-col h-full">
+      <ChatHeader
+        name={channel.name}
+        serverId={channel.serverId}
+        type="channel"
+      />
+      <ChatMessages 
+      member={member}
+      name={channel.name}
+      chatId={channel.id}
+      type="channel"
+      apiUrl="/api/messages"
+      socketUrl="/api/socket/messages"
+      socketQuery={{
+        channelId: channel.id,
+        serverId: channel.serverId,
+      }}
+      paramKey="channelId"
+      paramValue={channel.id}
+      />
+      <ChatInput
+        name={channel.name}
+        type="channel"
+        apiUrl="/api/socket/messages"
+        query={{
+          channelId: channel.id,
+          serverId: channel.serverId,
+        }}
+        />
+      {/* {channel.type === ChannelType.TEXT && (
+        <>
+          <ChatMessages
+            member={member}
+            name={channel.name}
+            chatId={channel.id}
+            type="channel"
+            apiUrl="/api/messages"
+            socketUrl="/api/socket/messages"
+            socketQuery={{
+              channelId: channel.id,
+              serverId: channel.serverId,
+            }}
+            paramKey="channelId"
+            paramValue={channel.id}
+          />
+          <ChatInput
+            name={channel.name}
+            type="channel"
+            apiUrl="/api/socket/messages"
+            query={{
+              channelId: channel.id,
+              serverId: channel.serverId,
+            }}
+          />
+        </>
+      )}
+      {channel.type === ChannelType.AUDIO && (
+        <MediaRoom
+          chatId={channel.id}
+          video={false}
+          audio={true}
+        />
+      )}
+      {channel.type === ChannelType.VIDEO && (
+        <MediaRoom
+          chatId={channel.id}
+          video={true}
+          audio={true}
+        />
+      )} */}
+    </div>
+   );
+}
+ 
+export default ChannelIdPage;
+
+chat-header.tsx
+
+import { Hash } from "lucide-react";
+
+import { MobileToggle } from "@/components/mobile-toggle";
+import { UserAvatar } from "@/components/user-avatar";
+import { SocketIndicator } from "@/components/socket-indicator";
+
+// import { ChatVideoButton } from "./chat-video-button";
+
+interface ChatHeaderProps {
+  serverId: string;
+  name: string;
+  type: "channel" | "conversation";
+  imageUrl?: string;
+}
+
+export const ChatHeader = ({
+  serverId,
+  name,
+  type,
+  imageUrl
+}: ChatHeaderProps) => {
+  return (
+    <div className="text-md font-semibold px-3 flex items-center h-12 border-neutral-200 dark:border-neutral-800 border-b-2">
+      <MobileToggle serverId={serverId} />
+      {type === "channel" && (
+        <Hash className="w-5 h-5 text-zinc-500 dark:text-zinc-400 mr-2" />
+      )}
+      {type === "conversation" && (
+        <UserAvatar 
+          src={imageUrl}
+          className="h-8 w-8 md:h-8 md:w-8 mr-2"
+        />
+      )}
+      <p className="font-semibold text-md text-black dark:text-white">
+        {name}
+      </p>
+      <div className="ml-auto flex items-center">
+        {/* {type === "conversation" && (
+          <ChatVideoButton />
+        )} */}
+        <SocketIndicator />
+      </div>
+    </div>
+  )
+}
+
+memberId > page.tsx
+
+import { redirectToSignIn } from "@clerk/nextjs";
+import { redirect } from "next/navigation";
+
+import { db } from "@/lib/db";
+import { getOrCreateConversation } from "@/lib/conversation";
+import { currentProfile } from "@/lib/current-profile";
+import { ChatHeader } from "@/components/chat/chat-header";
+import { ChatMessages } from "@/components/chat/chat-messages";
+import { ChatInput } from "@/components/chat/chat-input";
+// import { MediaRoom } from "@/components/media-room";
+
+interface MemberIdPageProps {
+  params: {
+    memberId: string;
+    serverId: string;
+  },
+  searchParams: {
+    video?: boolean;
+  }
+}
+
+const MemberIdPage = async ({
+  params,
+  searchParams,
+}: MemberIdPageProps) => {
+  const profile = await currentProfile();
+
+  if (!profile) {
+    return redirectToSignIn();
+  }
+
+  const currentMember = await db.member.findFirst({
+    where: {
+      serverId: params.serverId,
+      profileId: profile.id,
+    },
+    include: {
+      profile: true,
+    },
+  });
+
+  if (!currentMember) {
+    return redirect("/");
+  }
+
+  const conversation = await getOrCreateConversation(currentMember.id, params.memberId);
+
+  if (!conversation) {
+    return redirect(`/servers/${params.serverId}`);
+  }
+
+  const { memberOne, memberTwo } = conversation;
+
+  const otherMember = memberOne.profileId === profile.id ? memberTwo : memberOne;
+
+  return ( 
+    <div className="bg-white dark:bg-[#313338] flex flex-col h-full">
+      <ChatHeader
+        imageUrl={otherMember.profile.imageUrl}
+        name={otherMember.profile.name}
+        serverId={params.serverId}
+        type="conversation"
+      />
+      {/* {searchParams.video && (
+        <MediaRoom
+          chatId={conversation.id}
+          video={true}
+          audio={true}
+        />
+      )}
+      {!searchParams.video && ( */}
+        {/* <> */}
+          <ChatMessages
+            member={currentMember}
+            name={otherMember.profile.name}
+            chatId={conversation.id}
+            type="conversation"
+            apiUrl="/api/direct-messages"
+            paramKey="conversationId"
+            paramValue={conversation.id}
+            socketUrl="/api/socket/direct-messages"
+            socketQuery={{
+              conversationId: conversation.id,
+            }}
+          />
+          <ChatInput
+            name={otherMember.profile.name}
+            type="conversation"
+            apiUrl="/api/socket/direct-messages"
+            query={{
+              conversationId: conversation.id,
+            }}
+          />
+        {/* </> */}
+      {/* )} */}
+    </div>
+   );
+}
+ 
+export default MemberIdPage;
+
+app>api>livekit+>route.ts
+
+components>media-room.tsx
